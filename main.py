@@ -27,7 +27,11 @@ the whole game:
   history itself shows earners moving, a log-time fit of ln(earners) is
   blended in (at most 70% weight) so real trends override the prior.
 * the 100% trophy (Complete Gone Fishing) is already earned by everyone, so
-  its curve is C 1.0, t50 1 h: newcomers earn it too, and it stays ~100%.
+  its curve is C 1.0, t50 0.25 h, k 8/h -- a near-step: newcomers earn it too,
+  and it stays ~100%.  (The old t50 1 h / k 2/h implied ~0.2% of newcomers
+  had not done the first mission by hour 4, contradicting the observed
+  638/638 and the 100% rate surviving the 6x refresh; it cost 2.6 logit of
+  pinball on p00 alone.)
 
 Spread
 ------
@@ -150,7 +154,14 @@ def trophy_curve(trophy: dict):
     if any(p in desc for p in _GRIND_PATTERNS):
         return (0.05, 500.0, 0.015)
     if "complete gone fishing" in desc:
-        return (1.0, 1.0, 2.0)
+        # The first mission: 638/638 tracked players already had it on launch
+        # night, and the rate stayed 100% after the 04:30Z refresh to 3,868
+        # tracked (RULES.txt).  So it is earned by essentially everyone
+        # within minutes of being tracked: a near-step curve (t50 0.25 h,
+        # k 8/h) so newcomers earn it with probability ~1, instead of the
+        # old (1.0, 1.0, 2.0), which implied ~0.2% of newcomers had not done
+        # it by hour 4 and cost 2.6 logit of pinball on p00 alone.
+        return (1.0, 0.25, 8.0)
     m = re.search(r"chapter (\d)", desc)
     if m:
         return {
