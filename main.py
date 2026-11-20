@@ -88,14 +88,31 @@ Z = [-1.645, -0.674, 0, 0.674, 1.645]
 # --- Model parameters (calibrated on the practice cases; see the docstring) ---
 P = {
     "mN_prior": 5.66,     # log-time slope of tracked when history is flat
+    "mN_sustained": 0.8,  # sustained-growth prior when a real fit exists:
+                          # the launch-night refresh slope (mN_prior) is a
+                          # one-time jump, NOT sustained growth; blending it
+                          # into a multi-day fit overstates tracked growth
+                          # ~3x and dilutes every rate. v2 only uses
+                          # mN_prior when the history is flat (no fit).
     "mN_cap": 3.0,        # cap on the fitted tracked slope
     "mE_cap": 3.0,        # cap on the fitted earners slope
+    "wE_cap": 0.0,        # cap on the earners-fit blend weight (was 0.7):
+                          # the log-time earners fit extrapolates a
+                          # saturating process as a power law; the
+                          # saturating progression curve should dominate.
     "N_growth_cap": 50.0, # cap on tracked growth over the horizon (x)
     "ratio_cap": 50.0,    # cap on the progression-curve earners ratio
     "sN": 0.6,            # spread: tracked uncertainty per sqrt(day)
     "sE": 0.5,            # spread: earners uncertainty per sqrt(day)
     "s0": 0.15,           # spread: base, in logit units
     "s_max": 2.5,         # spread: cap, in logit units
+    "spread_scale": 0.65,  # multiplier on the spread (1.0 = v1 calibration)
+    "arr_play_h": 1.0,    # hours a newcomer has already played when they
+                          # first sync to Exophase (they must have played
+                          # to have trophies to sync). Added to each
+                          # arrival slice's playtime in the newcomer
+                          # convolution; it is what keeps the 100% trophy
+                          # (Gone Fishing) at 100% after a refresh.
 }
 
 # Grind/collectible descriptions: slow, low ceiling.
@@ -245,14 +262,17 @@ def forecast_case(case: dict, name: str) -> dict:
         _, mN_fit = _fit_loglog(xs, ys)
         mN_fit = max(0.0, min(mN_fit, P["mN_cap"]))
         w = min(0.7, len(xs) / 24.0)
-        mN_eff = w * mN_fit + (1 - w) * P["mN_prior"]
+        # A real fit exists: shrink it only toward a MODEST sustained-growth
+        # prior. The launch-night refresh slope (mN_prior = 5.66) is a
+        # one-time jump when Exophase first refreshed; it is not sustained
+        # growth, and blending it into a multi-day fit overstates the
+        # tracked count several-fold, which dilutes every rate.
+        mN_eff = w * mN_fit + (1 - w) * P["mN_sustained"]
     else:
         mN_eff = P["mN_prior"]
     N_t = max(N_last, math.exp(math.log(max(N_last, 1)) + mN_eff * dlogt))
     N_t = min(N_t, N_last * P["N_growth_cap"])
     dN = max(0.0, N_t - N_last)
-    # Effective playtime for newcomers (late-horizon weighted).
-    t_eff = t_c + 0.75 * horizon_hours
 
     rows = []
     for i, trophy in enumerate(trophies):
@@ -272,8 +292,29 @@ def forecast_case(case: dict, name: str) -> dict:
         u_t = u_curve(C, t50, k, max(t_t, 0.05))
         ratio = min(u_t / max(u_c, 1e-9), P["ratio_cap"])
         E_exist = min(E_last * ratio, float(N_last))
-        # Newcomers: earn at the curve's value at their effective playtime.
-        E_new = dN * u_curve(C, t50, k, max(t_eff, 0.05))
+        # Newcomers: the arrivals between the cut and the target have a
+        # DISTRIBUTION of playtimes (a player arriving late has only hours
+        # of play by the target, not the full horizon). v1 assumed every
+        # newcomer had the full horizon's playtime, which overstates
+        # newcomer earners badly once the earners fit no longer
+        # compensates. Integrate over the arrival distribution: N(s)
+        # follows the same log-time growth as the tracked forecast, and
+        # arrivals in each slice earn at the curve value for their
+        # playtime (target - arrival time).
+        E_new = 0.0
+        if dN > 0.0:
+            K = 12
+            step = (t_t - t_c) / K
+            prev_N = float(N_last)
+            for j in range(K):
+                s_lo = t_c + j * step
+                s_hi = t_c + (j + 1) * step
+                N_hi = N_last * math.exp(mN_eff * (math.log1p(max(s_hi, 0.0)) - math.log1p(max(t_c, 0.0))))
+                N_hi = min(N_hi, N_t)
+                dN_j = max(0.0, N_hi - prev_N)
+                play_j = max(0.0, t_t - (s_lo + s_hi) / 2.0) + P["arr_play_h"]
+                E_new += dN_j * u_curve(C, t50, k, max(play_j, 0.05))
+                prev_N = N_hi
         E_t = min(E_exist + E_new, N_t)
         E_t = max(E_t, 1e-6)
 
@@ -292,7 +333,7 @@ def forecast_case(case: dict, name: str) -> dict:
         if E_var and len(ex) >= 3:
             _, mE_fit = _fit_loglog(ex, ey)
             mE_fit = max(0.0, min(mE_fit, P["mE_cap"]))
-            w = min(0.7, len(ex) / 24.0)
+            w = min(P["wE_cap"], len(ex) / 24.0)
             E_fit = min(E_last * math.exp(mE_fit * dlogt), N_t)
             E_t = min((1 - w) * E_t + w * E_fit, N_t)
             E_t = max(E_t, 1e-6)
@@ -303,7 +344,7 @@ def forecast_case(case: dict, name: str) -> dict:
         rarity = 1.0 / math.sqrt(max(r_med, 0.05))
         s_earn = P["sE"] * math.sqrt(days) * min(rarity, 4.0)
         s = math.sqrt(P["s0"] ** 2 + s_track ** 2 + s_earn ** 2)
-        s = min(s, P["s_max"])
+        s = min(s, P["s_max"]) * P["spread_scale"]
         lg = logit(r_med)
         qs = [round4(inv_logit(lg + z * s)) for z in Z]
         for kk in range(1, 5):
