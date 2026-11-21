@@ -88,12 +88,18 @@ Z = [-1.645, -0.674, 0, 0.674, 1.645]
 # --- Model parameters (calibrated on the practice cases; see the docstring) ---
 P = {
     "mN_prior": 5.66,     # log-time slope of tracked when history is flat
-    "mN_sustained": 0.8,  # sustained-growth prior when a real fit exists:
-                          # the launch-night refresh slope (mN_prior) is a
-                          # one-time jump, NOT sustained growth; blending it
-                          # into a multi-day fit overstates tracked growth
-                          # ~3x and dilutes every rate. v2 only uses
-                          # mN_prior when the history is flat (no fit).
+    "mN_sustained": 2.5,  # sustained-growth prior when a real fit exists.
+                          # v4: raised from 0.8. Validation on 48 synthetic
+                          # final-like scenarios (4 seeds) showed v2's median
+                          # systematically OVERestimates rates by +0.6 logit
+                          # (the logistic progression curves rise faster than
+                          # the truth over a 4.5-day horizon). A higher
+                          # sustained prior grows the tracked forecast faster,
+                          # which dilutes the forecast rates back toward the
+                          # truth (newcomers dilute) and cuts pinball ~35%.
+                          # The fitted slope itself is unchanged; only the
+                          # shrink target moves. The optimum is a smooth
+                          # plateau around 2.2-2.7 on all four sets.
     "mN_cap": 3.0,        # cap on the fitted tracked slope
     "mE_cap": 3.0,        # cap on the fitted earners slope
     "wE_cap": 0.0,        # cap on the earners-fit blend weight (was 0.7):
@@ -106,7 +112,11 @@ P = {
     "sE": 0.5,            # spread: earners uncertainty per sqrt(day)
     "s0": 0.15,           # spread: base, in logit units
     "s_max": 2.5,         # spread: cap, in logit units
-    "spread_scale": 0.65,  # multiplier on the spread (1.0 = v1 calibration)
+    "spread_scale": 0.45,  # multiplier on the spread (v2: 0.65). v4: the
+                          # central forecast got much more accurate (typical
+                          # miss 11.7pp -> ~5pp), so the optimal spread is
+                          # narrower; 0.45 keeps 90% coverage ~0.89-0.95 on
+                          # all four validation sets. 0.40 under-covers.
     "arr_play_h": 1.0,    # hours a newcomer has already played when they
                           # first sync to Exophase (they must have played
                           # to have trophies to sync). Added to each
