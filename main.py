@@ -88,6 +88,10 @@ Z = [-1.645, -0.674, 0, 0.674, 1.645]
 # --- Model parameters (calibrated on the practice cases; see the docstring) ---
 P = {
     "mN_prior": 5.66,     # log-time slope of tracked when history is flat
+    "mN_sustained": 0.8,  # modest sustained-growth prior: the launch-night
+                          # refresh slope (mN_prior=5.66) is a one-off jump,
+                          # NOT sustained growth — blending it into a multi-day
+                          # fit overstates tracked count and dilutes every rate
     "mN_cap": 3.0,        # cap on the fitted tracked slope
     "mE_cap": 3.0,        # cap on the fitted earners slope
     "N_growth_cap": 50.0, # cap on tracked growth over the horizon (x)
@@ -245,7 +249,7 @@ def forecast_case(case: dict, name: str) -> dict:
         _, mN_fit = _fit_loglog(xs, ys)
         mN_fit = max(0.0, min(mN_fit, P["mN_cap"]))
         w = min(0.7, len(xs) / 24.0)
-        mN_eff = w * mN_fit + (1 - w) * P["mN_prior"]
+        mN_eff = w * mN_fit + (1 - w) * P["mN_sustained"]
     else:
         mN_eff = P["mN_prior"]
     N_t = max(N_last, math.exp(math.log(max(N_last, 1)) + mN_eff * dlogt))
